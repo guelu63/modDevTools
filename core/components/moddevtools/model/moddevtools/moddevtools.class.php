@@ -10,7 +10,6 @@ class modDevTools {
     /** @var array $perms Permissions  */
     protected $perms = array();
 
-
 	/**
 	 * @param modX $modx
 	 * @param array $config
@@ -36,6 +35,7 @@ class modDevTools {
 			'snippetsPath' => $corePath . 'elements/snippets/',
 			'processorsPath' => $corePath . 'processors/',
             'modx23' => !empty($this->modx->version) && version_compare($this->modx->version['full_version'], '2.3.0', '>='),
+            'createVirtual' => false,
             'debug' => false,
 		), $config);
 
@@ -229,6 +229,8 @@ class modDevTools {
         foreach ($links as $link) {
             $link->remove();
         }
+        // Prevent fast increasing of link id
+        $this->modx->query("ALTER TABLE {$this->modx->getTableName('modDevToolsLink')} AUTO_INCREMENT = 0;");
     }
 
     /**
@@ -338,6 +340,9 @@ class modDevTools {
         }
 
         $this->clearLinks($objLink, $object->get('id'));
+        if ($this->config['createVirtual']) {
+            $this->removeVirtualChunks();
+        }
 
         $tags = array();
         $this->findTags($object->get('content'), $tags);
@@ -370,10 +375,50 @@ class modDevTools {
              * @var bool|xPDOObject $child
              */
             $child = $this->findObject($tag['class'], $tag['name']);
+            if ($this->config['createVirtual'] && ($child === false) && ($tag['class'] == 'modChunk')) {
+                $child = $this->createVirtualChunk($tag['name']);
+            }
             if ($child !== false) {
                 $this->createLink($parent, $child, $linkType . '-' . $type);
             }
         }
+    }
+
+    /**
+     * Remove virtual chunks
+     * @return bool
+     */
+    public function removeVirtualChunks() {
+        $chunks = $this->modx->getIterator('modChunk', array('snippet' => 'moddevtools'));
+        if (empty($chunks)) {
+            return false;
+        }
+        $this->debug('Remove virtual chunks');
+        /** @var modChunk $chunk */
+        foreach ($chunks as $chunk) {
+            $chunk->remove();
+        }
+        // Prevent fast increasing of chunk id
+        $this->modx->query("ALTER TABLE {$this->modx->getTableName('modChunk')} AUTO_INCREMENT = 0;");
+        return true;
+    }
+
+    /**
+     * Create virtual chunk with given name
+     * @param $name
+     * @return bool|modChunk
+     */
+    public function createVirtualChunk($name) {
+        $this->debug('Try to create virtual chunk ' . $name);
+        /** @var modChunk $chunk */
+        $chunk = $this->modx->newObject('modChunk');
+        $chunk->set('name', $name);
+        $chunk->set('snippet', 'moddevtools');
+        $saved = false;
+        if ($chunk->validate()) {
+            $saved = $chunk->save();
+        }
+        return $saved ? $chunk: false;
     }
 
     /**
@@ -421,6 +466,8 @@ class modDevTools {
     public function getBreadCrumbs($config) {
         $mode = $this->modx->getOption('mode', $config);
         $resource = $this->modx->getOption('resource', $config);
+        $rootId = $this->modx->getOption('tree_root_id');
+        $limit = 3; /** @TODO вынести в настройки, когда они будут */
 
         if (($mode === modSystemEvent::MODE_NEW) || !$resource) {
             if (!isset($_GET['parent'])) {return;}
@@ -432,10 +479,15 @@ class modDevTools {
             $this->modx->reloadContext($context);
         }
 
-        /** @TODO вынести в настройки, когда они будут */
-        $limit = 3;
-        $resources = $this->modx->getParentIds($resource->get('id'), $limit, array( 'context' => $context ));
-
+        if ($rootId == $resource->get('id')) {
+            $resources = array();
+        } else {
+            $resources = $this->modx->getParentIds($resource->get('id'), $limit, array( 'context' => $context ));
+            $rootKey = array_search($rootId, $resources);
+            if ($rootKey !== false) {
+                $resources = array_slice($resources, 0, $rootKey+1);
+            }
+        }
 
         if ($mode === modSystemEvent::MODE_NEW) {
             array_unshift($resources, $_GET['parent']);
@@ -471,6 +523,8 @@ class modDevTools {
             if ($resId == 0) {
                 continue;
             }
+
+            /** @var modResource $parent */
             $parent = $this->modx->getObject('modResource', $resId);
             if (!$parent) {break;}
             if ($parent->get('parent') == 0) {

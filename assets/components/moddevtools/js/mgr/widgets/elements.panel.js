@@ -33,8 +33,7 @@ modDevTools.panel.Elements = function(config) {
     var tabs = config.ownerCt.ownerCt;
     if (!tabs.isDevToolsEventSet) {
         tabs.addListener('tabchange', function(){
-            var btn = Ext.getCmp('modx-abtn-save');
-            btn.setDisabled(false);
+            this.disableSaveButton(false);
         }, this);
         tabs.isDevToolsEventSet = true;
     }
@@ -55,7 +54,7 @@ Ext.extend(modDevTools.panel.Elements, MODx.Panel, {
             url: modDevTools.config.connector_url,
             baseParams: baseParams,
             autoLoad: true,
-            fields: ['id', 'name', 'snippet'],
+            fields: ['id', 'name', 'snippet', 'virtual'],
             root: 'results',
             totalProperty: 'total',
             autoDestroy: true,
@@ -71,7 +70,7 @@ Ext.extend(modDevTools.panel.Elements, MODx.Panel, {
                             headerCfg: {
                                 cls: 'x-panel-header',
                                 style: {
-                                    background: '#ececec',
+                                    background: r.virtual ? '#f0ad4e' : '#ececec',
                                     padding: '10px',
                                     margin: '0 0 10px 0'
                                 }
@@ -110,8 +109,7 @@ Ext.extend(modDevTools.panel.Elements, MODx.Panel, {
                                     }},
                                     'focus': {fn:function(editor){
                                         this.focusedEditor = editor;
-                                        var btn = Ext.getCmp('modx-abtn-save');
-                                        btn.setDisabled(true);
+                                        this.disableSaveButton(true);
                                     }, scope: this},
                                     afterrender: {fn:function(field) {
                                         if (field.xtype == 'modx-texteditor') {
@@ -163,14 +161,28 @@ Ext.extend(modDevTools.panel.Elements, MODx.Panel, {
                                         });
                                     }}
                                 }
+                            },{
+                                xtype: 'button',
+                                id: 'open-' + params.element + '-' + r.id,
+                                text: _('open'),
+                                element: params.element,
+                                elementId: r.id,
+                                listeners: {
+                                    click: {fn:function() {
+                                        var action = 'element/'+this.element+'/update';
+                                        window.open('?a=' + (modDevTools.modx23 ? action : MODx.action[action]) + '&id=' + this.elementId);
+                                    }}
+                                }
                             }],
                             listeners: {
                                 'beforecollapse':{fn:function(a,b){
                                     return b !== true; // prevent collapse if not collapse directly on panel
-                                },scope: this}
+                                },scope: this},
+                                'render': this.loadTip
                             },
                             collapsed:false,
-                            collapsible: true
+                            collapsible: true,
+                            virtual: r.virtual
                         };
                         this.items.itemAt(1).add(item);
                     }
@@ -180,6 +192,16 @@ Ext.extend(modDevTools.panel.Elements, MODx.Panel, {
         });
     },
 
+    loadTip: function(){
+        if (this.virtual) {
+            Ext.QuickTips.register({
+                target:  this.header
+                ,text: _('moddevtools_virtual_chunk_desc')
+                ,enabled: true
+            });
+        }
+    },
+
     getUpdateParams: function(input) {
         return {
             action: modDevTools.modx23 ? 'element/' + this.config.config.element + '/update' : 'update',
@@ -187,6 +209,13 @@ Ext.extend(modDevTools.panel.Elements, MODx.Panel, {
             name: input.record.name,
             snippet: input.getValue()
         };
+    },
+
+    disableSaveButton: function(value) {
+        var btns = Ext.getCmp('modx-action-buttons');
+        if (btns && btns.get(0)) {
+            btns.get(0).setDisabled(value);
+        }
     },
 
     highlightElements: function(editor, name) {
